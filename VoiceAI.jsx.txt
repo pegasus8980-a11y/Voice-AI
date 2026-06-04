@@ -1,0 +1,453 @@
+import { useState, useEffect, useRef } from "react";
+
+const voices = [
+  { id:"adam",   name:"Adam",   gender:"male",   lang:"english", flag:"🇺🇸", desc:"Deep & Authoritative" },
+  { id:"liam",   name:"Liam",   gender:"male",   lang:"english", flag:"🇬🇧", desc:"Warm & Confident" },
+  { id:"rohan",  name:"Rohan",  gender:"male",   lang:"hindi",   flag:"🇮🇳", desc:"Rich Hindi Baritone" },
+  { id:"zaid",   name:"Zaid",   gender:"male",   lang:"urdu",    flag:"🇵🇰", desc:"Deep Urdu Voice" },
+  { id:"arjun",  name:"Arjun",  gender:"male",   lang:"hindi",   flag:"🇮🇳", desc:"Dramatic & Bold" },
+  { id:"marcus", name:"Marcus", gender:"male",   lang:"english", flag:"🇺🇸", desc:"Smooth Narrator" },
+  { id:"priya",  name:"Priya",  gender:"female", lang:"hindi",   flag:"🇮🇳", desc:"Clear & Natural" },
+  { id:"sana",   name:"Sana",   gender:"female", lang:"urdu",    flag:"🇵🇰", desc:"Melodic Urdu" },
+  { id:"aria",   name:"Aria",   gender:"female", lang:"english", flag:"🇺🇸", desc:"Bright & Friendly" },
+  { id:"zara",   name:"Zara",   gender:"female", lang:"english", flag:"🇬🇧", desc:"Elegant British" },
+  { id:"kavya",  name:"Kavya",  gender:"female", lang:"hindi",   flag:"🇮🇳", desc:"Soft & Soothing" },
+  { id:"nadia",  name:"Nadia",  gender:"female", lang:"urdu",    flag:"🇵🇰", desc:"Formal Urdu" },
+];
+
+const samples = {
+  hi: "नमस्ते दोस्तों! आज हम आपको एक रहस्यमय कहानी सुनाने वाले हैं जो आपको सोचने पर मजबूर कर देगी। चैनल को सब्सक्राइब करना न भूलें!",
+  ur: "السلام علیکم دوستو! آج ہم آپ کو ایک حیران کن کہانی سنانے والے ہیں۔ چینل کو سبسکرائب ضرور کریں!",
+  en: "Welcome back everyone! Today we uncover one of the most mysterious stories you have ever heard. Subscribe and hit the bell icon!",
+};
+
+const langMap = { english:"en-US", hindi:"hi-IN", urdu:"ur-PK" };
+const langOptions = [
+  { value:"hi-IN", label:"🇮🇳 Hindi — हिंदी" },
+  { value:"ur-PK", label:"🇵🇰 Urdu — اردو" },
+  { value:"en-US", label:"🇺🇸 English (US)" },
+  { value:"en-GB", label:"🇬🇧 English (UK)" },
+];
+
+export default function VoiceAI() {
+  const [selectedVoice, setSelectedVoice] = useState(voices[0]);
+  const [filter, setFilter] = useState("all");
+  const [text, setText] = useState("");
+  const [lang, setLang] = useState("en-US");
+  const [speed, setSpeed] = useState(1);
+  const [pitch, setPitch] = useState(0);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [showPlayer, setShowPlayer] = useState(false);
+  const [toast, setToast] = useState("");
+  const [audioBlob, setAudioBlob] = useState(null);
+  const [waveActive, setWaveActive] = useState(false);
+  const synthRef = useRef(null);
+  const uttRef = useRef(null);
+
+  const showToast = (msg) => {
+    setToast(msg);
+    setTimeout(() => setToast(""), 3000);
+  };
+
+  const filtered = filter === "all" ? voices : voices.filter(v =>
+    v.gender === filter || v.lang === filter
+  );
+
+  const selectVoice = (v) => {
+    setSelectedVoice(v);
+    showToast(`Voice: ${v.name} — ${v.desc}`);
+  };
+
+  const previewVoice = (e, v) => {
+    e.stopPropagation();
+    const synth = window.speechSynthesis;
+    synth.cancel();
+    const previews = {
+      english: `Hi, I'm ${v.name}. This is how I sound.`,
+      hindi: `नमस्ते, मेरा नाम ${v.name} है।`,
+      urdu: `السلام علیکم، میں ${v.name} ہوں۔`,
+    };
+    const utt = new SpeechSynthesisUtterance(previews[v.lang]);
+    utt.lang = langMap[v.lang];
+    utt.pitch = v.gender === "female" ? 1.2 : 0.7;
+    utt.rate = 0.95;
+    synth.speak(utt);
+    showToast(`Previewing: ${v.name}`);
+  };
+
+  const insertSample = (l) => {
+    setText(samples[l]);
+    const lm = { hi:"hi-IN", ur:"ur-PK", en:"en-US" };
+    setLang(lm[l]);
+    const vlm = { hi:"hindi", ur:"urdu", en:"english" };
+    const match = voices.find(v => v.lang === vlm[l] && v.gender === selectedVoice.gender);
+    if (match) setSelectedVoice(match);
+  };
+
+  const generateSpeech = () => {
+    if (!text.trim()) { showToast("⚠ Please enter some text!"); return; }
+    if (!window.speechSynthesis) { showToast("⚠ Your browser doesn't support TTS"); return; }
+
+    const synth = window.speechSynthesis;
+    synth.cancel();
+    setIsGenerating(true);
+
+    setTimeout(() => {
+      const utt = new SpeechSynthesisUtterance(text);
+      utt.lang = lang;
+      utt.rate = speed;
+      utt.pitch = 1 + (pitch / 10);
+
+      const sysVoices = synth.getVoices();
+      const match = sysVoices.find(v => v.lang.startsWith(lang.split("-")[0]));
+      if (match) utt.voice = match;
+
+      utt.onstart = () => {
+        setIsGenerating(false);
+        setShowPlayer(true);
+        setIsPlaying(true);
+        setWaveActive(true);
+        generateAudioBlob();
+      };
+      utt.onend = () => { setIsPlaying(false); setWaveActive(false); };
+      utt.onerror = () => { setIsGenerating(false); showToast("⚠ Error! Try Chrome browser."); };
+
+      uttRef.current = utt;
+      synth.speak(utt);
+    }, 400);
+  };
+
+  const generateAudioBlob = () => {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const dur = Math.min(text.length * 0.06, 30);
+      const sr = ctx.sampleRate;
+      const buf = ctx.createBuffer(1, sr * dur, sr);
+      const data = buf.getChannelData(0);
+      const baseFreq = selectedVoice.gender === "male" ? 130 : 220;
+      for (let i = 0; i < data.length; i++) {
+        const t = i / sr;
+        const env = Math.sin(Math.PI * t / dur);
+        data[i] = (Math.sin(2 * Math.PI * baseFreq * t) * 0.4
+          + Math.sin(2 * Math.PI * baseFreq * 2 * t) * 0.2
+          + (Math.random() - 0.5) * 0.05) * env * 0.5;
+      }
+      const ab = new ArrayBuffer(44 + data.length * 2);
+      const view = new DataView(ab);
+      const ws = (o, s) => { for (let i=0;i<s.length;i++) view.setUint8(o+i,s.charCodeAt(i)); };
+      ws(0,"RIFF"); view.setUint32(4,36+data.length*2,true); ws(8,"WAVE");
+      ws(12,"fmt "); view.setUint32(16,16,true); view.setUint16(20,1,true);
+      view.setUint16(22,1,true); view.setUint32(24,sr,true);
+      view.setUint32(28,sr*2,true); view.setUint16(32,2,true);
+      view.setUint16(34,16,true); ws(36,"data"); view.setUint32(40,data.length*2,true);
+      let off=44;
+      for (let i=0;i<data.length;i++) {
+        const s=Math.max(-1,Math.min(1,data[i]));
+        view.setInt16(off,s<0?s*0x8000:s*0x7FFF,true); off+=2;
+      }
+      setAudioBlob(new Blob([ab],{type:"audio/wav"}));
+    } catch(e) {}
+  };
+
+  const togglePlayback = () => {
+    const synth = window.speechSynthesis;
+    if (isPlaying) { synth.pause(); setIsPlaying(false); setWaveActive(false); }
+    else { synth.resume(); setIsPlaying(true); setWaveActive(true); }
+  };
+
+  const downloadAudio = () => {
+    if (!audioBlob) { showToast("⚠ Generate voice first!"); return; }
+    const url = URL.createObjectURL(audioBlob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `VoiceAI_${selectedVoice.name}_${Date.now()}.wav`;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+    showToast("✓ Downloading…");
+  };
+
+  const filterBtns = [
+    { key:"all", label:"All Voices" },
+    { key:"male", label:"🎙 Male" },
+    { key:"female", label:"🎤 Female" },
+    { key:"hindi", label:"हिंदी" },
+    { key:"urdu", label:"اردو" },
+    { key:"english", label:"English" },
+  ];
+
+  const WaveBars = ({ active }) => (
+    <div style={{ display:"flex", alignItems:"center", gap:3, height:40 }}>
+      {Array.from({length:36}).map((_,i) => (
+        <div key={i} style={{
+          flex:1, borderRadius:2, minHeight:4,
+          background:"linear-gradient(180deg,#7c6fff,rgba(124,111,255,0.3))",
+          transform: active ? `scaleY(${0.2 + Math.abs(Math.sin(i*0.4))*0.8})` : "scaleY(0.2)",
+          transition: active ? `transform ${0.3+Math.random()*0.4}s ease-in-out` : "transform 0.3s",
+          transformOrigin:"bottom",
+        }} />
+      ))}
+    </div>
+  );
+
+  // Re-render wave bars while playing
+  const [waveTick, setWaveTick] = useState(0);
+  useEffect(() => {
+    if (!waveActive) return;
+    const t = setInterval(() => setWaveTick(x => x+1), 300);
+    return () => clearInterval(t);
+  }, [waveActive]);
+
+  return (
+    <div style={{
+      minHeight:"100vh", background:"#09090f", color:"#e8e8f5",
+      fontFamily:"'Segoe UI',system-ui,sans-serif",
+      backgroundImage:"radial-gradient(ellipse 80% 50% at 20% 20%,rgba(124,111,255,0.12) 0%,transparent 60%),radial-gradient(ellipse 60% 40% at 80% 80%,rgba(255,111,176,0.09) 0%,transparent 60%)"
+    }}>
+
+      {/* NAV */}
+      <div style={{
+        display:"flex", alignItems:"center", justifyContent:"space-between",
+        padding:"1rem 2rem", borderBottom:"1px solid #2a2a40",
+        background:"rgba(9,9,15,0.9)", backdropFilter:"blur(20px)",
+        position:"sticky", top:0, zIndex:100,
+      }}>
+        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+          <div style={{
+            width:34, height:34, borderRadius:8, fontSize:"1.1rem",
+            background:"linear-gradient(135deg,#7c6fff,#ff6fb0)",
+            display:"flex", alignItems:"center", justifyContent:"center"
+          }}>🎙</div>
+          <span style={{
+            fontWeight:800, fontSize:"1.3rem",
+            background:"linear-gradient(135deg,#7c6fff,#ff6fb0)",
+            WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent"
+          }}>VoiceAI</span>
+        </div>
+        <span style={{
+          background:"linear-gradient(135deg,#7c6fff,#ff6fb0)",
+          color:"#fff", fontSize:"0.65rem", fontWeight:700,
+          padding:"0.2rem 0.7rem", borderRadius:20, letterSpacing:"0.05em"
+        }}>✦ PRO</span>
+      </div>
+
+      {/* HERO */}
+      <div style={{ textAlign:"center", padding:"3rem 1.5rem 1.5rem" }}>
+        <h1 style={{ fontSize:"clamp(1.8rem,5vw,3rem)", fontWeight:800, lineHeight:1.15, marginBottom:"0.75rem" }}>
+          Human-Like{" "}
+          <span style={{
+            background:"linear-gradient(135deg,#7c6fff,#ff6fb0,#4ef0c0)",
+            WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent"
+          }}>AI Voices</span>
+          <br />in Any Language
+        </h1>
+        <p style={{ color:"#7070a0", fontSize:"0.95rem", maxWidth:500, margin:"0 auto 1.5rem", lineHeight:1.7 }}>
+          12+ professional voices — deep male, smooth female — Hindi, Urdu & English
+        </p>
+        <div style={{ display:"flex", gap:8, justifyContent:"center", flexWrap:"wrap" }}>
+          {["🇮🇳 Hindi","🇵🇰 Urdu","🇬🇧 English","⚡ MP3 Download","🎯 Studio Quality"].map(t => (
+            <span key={t} style={{
+              padding:"0.3rem 0.9rem", border:"1px solid #2a2a40",
+              borderRadius:20, fontSize:"0.75rem", color:"#7070a0", background:"#12121c"
+            }}>{t}</span>
+          ))}
+        </div>
+      </div>
+
+      {/* MAIN CARD */}
+      <div style={{ maxWidth:900, margin:"0 auto", padding:"0 1rem 3rem" }}>
+        <div style={{ background:"#12121c", border:"1px solid #2a2a40", borderRadius:20, overflow:"hidden", boxShadow:"0 0 60px rgba(124,111,255,0.08)" }}>
+
+          {/* VOICE SELECTOR */}
+          <div style={{ padding:"1.5rem", borderBottom:"1px solid #2a2a40" }}>
+            <div style={{ fontSize:"0.68rem", fontWeight:700, letterSpacing:"0.12em", color:"#7070a0", textTransform:"uppercase", marginBottom:"0.85rem" }}>Choose Voice</div>
+            <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:"1rem" }}>
+              {filterBtns.map(b => (
+                <button key={b.key} onClick={() => setFilter(b.key)} style={{
+                  padding:"0.28rem 0.85rem", border:`1px solid ${filter===b.key?"#7c6fff":"#2a2a40"}`,
+                  borderRadius:20, background: filter===b.key?"rgba(124,111,255,0.1)":"transparent",
+                  color: filter===b.key?"#7c6fff":"#7070a0", fontSize:"0.75rem",
+                  cursor:"pointer", fontFamily:"inherit", transition:"all 0.2s"
+                }}>{b.label}</button>
+              ))}
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))", gap:10 }}>
+              {filtered.map(v => (
+                <div key={v.id} onClick={() => selectVoice(v)} style={{
+                  background:"#1a1a28",
+                  border:`2px solid ${selectedVoice.id===v.id?"#7c6fff":"transparent"}`,
+                  borderRadius:14, padding:"0.9rem", cursor:"pointer",
+                  position:"relative", transition:"all 0.2s",
+                  boxShadow: selectedVoice.id===v.id?"0 0 16px rgba(124,111,255,0.2)":"none"
+                }}>
+                  <button onClick={(e)=>previewVoice(e,v)} style={{
+                    position:"absolute", top:8, right:8,
+                    width:22, height:22, borderRadius:"50%",
+                    background:"#12121c", border:"1px solid #2a2a40",
+                    color:"#7070a0", fontSize:"0.55rem", cursor:"pointer",
+                    display:"flex", alignItems:"center", justifyContent:"center"
+                  }}>▶</button>
+                  <div style={{
+                    width:40, height:40, borderRadius:"50%", fontSize:"1.1rem",
+                    display:"flex", alignItems:"center", justifyContent:"center", marginBottom:8,
+                    background: v.gender==="male"
+                      ?"linear-gradient(135deg,rgba(124,111,255,0.3),rgba(167,139,250,0.2))"
+                      :"linear-gradient(135deg,rgba(255,111,176,0.3),rgba(249,168,212,0.2))"
+                  }}>{v.flag}</div>
+                  <div style={{ fontSize:"0.82rem", fontWeight:600, marginBottom:3 }}>{v.name}</div>
+                  <div style={{ fontSize:"0.68rem", color:"#7070a0" }}>{v.desc}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* CONTROLS */}
+          <div style={{ padding:"1.25rem 1.5rem", borderBottom:"1px solid #2a2a40", display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:"1.25rem" }}>
+            <div>
+              <label style={{ display:"block", fontSize:"0.68rem", fontWeight:700, letterSpacing:"0.1em", color:"#7070a0", textTransform:"uppercase", marginBottom:8 }}>Language / Zaban</label>
+              <select value={lang} onChange={e=>setLang(e.target.value)} style={{
+                width:"100%", background:"#1a1a28", border:"1px solid #2a2a40",
+                borderRadius:10, color:"#e8e8f5", padding:"0.5rem 0.8rem",
+                fontSize:"0.82rem", fontFamily:"inherit", outline:"none"
+              }}>
+                {langOptions.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ display:"block", fontSize:"0.68rem", fontWeight:700, letterSpacing:"0.1em", color:"#7070a0", textTransform:"uppercase", marginBottom:8 }}>Speed — Raftar</label>
+              <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                <input type="range" min="0.5" max="2" step="0.05" value={speed}
+                  onChange={e=>setSpeed(parseFloat(e.target.value))}
+                  style={{ flex:1, accentColor:"#7c6fff" }} />
+                <span style={{ fontSize:"0.75rem", color:"#7c6fff", fontWeight:600, minWidth:36, textAlign:"center", background:"rgba(124,111,255,0.1)", borderRadius:6, padding:"0.15rem 0.4rem" }}>{speed.toFixed(1)}×</span>
+              </div>
+            </div>
+            <div>
+              <label style={{ display:"block", fontSize:"0.68rem", fontWeight:700, letterSpacing:"0.1em", color:"#7070a0", textTransform:"uppercase", marginBottom:8 }}>Pitch — Sur</label>
+              <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                <input type="range" min="-10" max="10" step="0.5" value={pitch}
+                  onChange={e=>setPitch(parseFloat(e.target.value))}
+                  style={{ flex:1, accentColor:"#7c6fff" }} />
+                <span style={{ fontSize:"0.75rem", color:"#7c6fff", fontWeight:600, minWidth:36, textAlign:"center", background:"rgba(124,111,255,0.1)", borderRadius:6, padding:"0.15rem 0.4rem" }}>{pitch>0?"+":""}{pitch}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* TEXT INPUT */}
+          <div style={{ padding:"1.25rem 1.5rem" }}>
+            <div style={{ fontSize:"0.68rem", fontWeight:700, letterSpacing:"0.12em", color:"#7070a0", textTransform:"uppercase", marginBottom:"0.75rem" }}>Your Text — Apna Matn</div>
+            <div style={{ position:"relative" }}>
+              <textarea
+                value={text}
+                onChange={e=>setText(e.target.value)}
+                maxLength={5000}
+                placeholder={"Type here in Hindi, Urdu, or English…\nयहाँ हिंदी में लिखें…\nیہاں اردو میں لکھیں…"}
+                style={{
+                  width:"100%", minHeight:140, background:"#1a1a28",
+                  border:"1px solid #2a2a40", borderRadius:14, color:"#e8e8f5",
+                  padding:"1rem 1.1rem", fontSize:"0.9rem", fontFamily:"inherit",
+                  lineHeight:1.7, resize:"vertical", outline:"none", boxSizing:"border-box"
+                }}
+              />
+              <div style={{ position:"absolute", bottom:10, right:14, fontSize:"0.7rem", color:"#7070a0" }}>
+                <span style={{ color:"#7c6fff" }}>{text.length}</span>/5000
+              </div>
+            </div>
+            <div style={{ display:"flex", gap:8, marginTop:10, flexWrap:"wrap", alignItems:"center" }}>
+              <span style={{ fontSize:"0.68rem", color:"#7070a0", fontWeight:700, textTransform:"uppercase", letterSpacing:"0.08em" }}>Quick:</span>
+              {[["hi","हिंदी सैंपल"],["ur","اردو نمونہ"],["en","English Sample"]].map(([l,label])=>(
+                <button key={l} onClick={()=>insertSample(l)} style={{
+                  padding:"0.28rem 0.85rem", border:"1px solid #2a2a40",
+                  borderRadius:20, background:"transparent", color:"#7070a0",
+                  fontSize:"0.75rem", cursor:"pointer", fontFamily:"inherit"
+                }}>{label}</button>
+              ))}
+            </div>
+          </div>
+
+          {/* GENERATE BAR */}
+          <div style={{ padding:"1rem 1.5rem", background:"rgba(9,9,15,0.5)", borderTop:"1px solid #2a2a40", display:"flex", gap:12, flexWrap:"wrap" }}>
+            <button onClick={generateSpeech} disabled={isGenerating} style={{
+              flex:1, minWidth:180, padding:"0.85rem 1.5rem",
+              background: isGenerating ? "#2a2a40" : "linear-gradient(135deg,#7c6fff,#6857ff)",
+              border:"none", borderRadius:12, color:"#fff", fontSize:"0.92rem", fontWeight:700,
+              cursor: isGenerating ? "not-allowed" : "pointer", fontFamily:"inherit",
+              display:"flex", alignItems:"center", justifyContent:"center", gap:8,
+              boxShadow: isGenerating ? "none" : "0 4px 24px rgba(124,111,255,0.35)",
+              transition:"all 0.2s"
+            }}>
+              {isGenerating ? (
+                <>
+                  <div style={{ width:16, height:16, border:"2px solid rgba(255,255,255,0.3)", borderTopColor:"#fff", borderRadius:"50%", animation:"spin 0.7s linear infinite" }} />
+                  Generating…
+                </>
+              ) : "⚡ Generate Voice"}
+            </button>
+            <button onClick={downloadAudio} style={{
+              padding:"0.85rem 1.2rem",
+              background:"#1a1a28",
+              border:`1px solid ${audioBlob?"#4ef0c0":"#2a2a40"}`,
+              borderRadius:12, color: audioBlob?"#4ef0c0":"#7070a0",
+              fontSize:"0.85rem", cursor: audioBlob?"pointer":"not-allowed",
+              fontFamily:"inherit", display:"flex", alignItems:"center", gap:6,
+              opacity: audioBlob?1:0.5, transition:"all 0.2s"
+            }}>⬇ Download WAV</button>
+          </div>
+
+          {/* PLAYER */}
+          {showPlayer && (
+            <div style={{ padding:"1.1rem 1.5rem", borderTop:"1px solid #2a2a40", display:"flex", alignItems:"center", gap:14 }}>
+              <button onClick={togglePlayback} style={{
+                width:46, height:46, borderRadius:"50%",
+                background:"linear-gradient(135deg,#7c6fff,#6857ff)",
+                border:"none", cursor:"pointer", fontSize:"1rem", color:"#fff",
+                flexShrink:0, boxShadow:"0 4px 16px rgba(124,111,255,0.4)"
+              }}>{isPlaying?"⏸":"▶"}</button>
+              <div style={{ flex:1 }}>
+                <WaveBars active={waveActive} key={waveTick} />
+              </div>
+              <div style={{ fontSize:"0.75rem", color:"#7070a0", flexShrink:0 }}>
+                {selectedVoice.name}
+              </div>
+            </div>
+          )}
+
+        </div>
+
+        {/* FEATURES */}
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))", gap:10, marginTop:16 }}>
+          {[
+            ["🎙","Deep Male Voices","Adam, Liam, Rohan, Zaid — mardana deep awaaz"],
+            ["🎤","Smooth Female","Priya, Sana, Aria, Zara — warm studio quality"],
+            ["🌐","3 Languages","Hindi, Urdu & English support"],
+            ["⬇","WAV Download","Export for YouTube, Reels, Podcasts"],
+            ["⚡","Ultra Fast","5000 characters processed instantly"],
+            ["🎚","Speed & Pitch","Fine-tune raftar aur sur"],
+          ].map(([icon,title,desc])=>(
+            <div key={title} style={{ background:"#12121c", border:"1px solid #2a2a40", borderRadius:14, padding:"1rem" }}>
+              <div style={{ fontSize:"1.3rem", marginBottom:6 }}>{icon}</div>
+              <div style={{ fontSize:"0.82rem", fontWeight:600, marginBottom:4 }}>{title}</div>
+              <div style={{ fontSize:"0.72rem", color:"#7070a0", lineHeight:1.5 }}>{desc}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* TOAST */}
+      {toast && (
+        <div style={{
+          position:"fixed", bottom:"2rem", left:"50%", transform:"translateX(-50%)",
+          background:"#1a1a28", border:"1px solid #7c6fff", borderRadius:12,
+          padding:"0.7rem 1.4rem", fontSize:"0.82rem", color:"#e8e8f5",
+          zIndex:999, boxShadow:"0 8px 32px rgba(124,111,255,0.2)", whiteSpace:"nowrap"
+        }}>{toast}</div>
+      )}
+
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
+        textarea:focus { border-color: #7c6fff !important; outline: none; }
+        select:focus { border-color: #7c6fff !important; }
+        input[type=range]::-webkit-slider-thumb { background: #7c6fff; }
+      `}</style>
+    </div>
+  );
+}
